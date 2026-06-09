@@ -1,0 +1,7 @@
+node_modules/
+result.csv
+
+# 認証情報・秘密鍵は絶対にコミットしない
+service-account.json
+*.env
+.env

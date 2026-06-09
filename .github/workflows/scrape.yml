@@ -1,0 +1,32 @@
+name: Amazon Rank Scraper
+
+on:
+  schedule:
+    # 毎日 01:00 UTC = 日本時間 10:00 JST
+    - cron: '0 1 * * *'
+  # Actions タブから手動実行可
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright + system dependencies
+        run: npx playwright install --with-deps chromium
+
+      - name: Run scraper
+        run: node scrape.js
