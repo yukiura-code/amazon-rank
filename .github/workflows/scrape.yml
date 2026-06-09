@@ -2,9 +2,13 @@ name: Amazonランキングスクレイパー
 
 on:
   schedule:
-    # 毎日 01:00 UTC = 日本時間 10:00
-    - cron: "0 1 * * *"
+    - cron: "0 1 * * *"  # 毎日 01:00 UTC = JST 10:00
   workflow_dispatch:
+
+# ★これ重要（重複防止）
+concurrency:
+  group: amazon-scraper
+  cancel-in-progress: true
 
 jobs:
   scrape:
@@ -15,13 +19,13 @@ jobs:
       - name: チェックアウト
         uses: actions/checkout@v4
 
-      - name: Node.js 20 セットアップ
+      - name: Node.js セットアップ
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
 
-      - name: 依存関係インストール
+      - name: 依存インストール
         run: npm ci
 
       - name: Playwrightインストール
