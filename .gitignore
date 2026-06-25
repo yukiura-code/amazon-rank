@@ -5,3 +5,11 @@ result.csv
 service-account.json
 *.env
 .env
+
+# ログ・バックアップ・デバッグ
+logs/
+backups/
+log.txt
+*.log
+*_dump.html
+diagnose_*.js
