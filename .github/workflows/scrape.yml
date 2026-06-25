@@ -2,8 +2,8 @@
 
 on:
   schedule:
-    # 毎日 01:00 UTC = 日本時間 10:00 JST
-    - cron: '0 1 * * *'
+    # 毎日 23:00 UTC = 日本時間 08:00 JST
+    - cron: '0 23 * * *'
 
   # 手動実行
   workflow_dispatch:
