@@ -15,9 +15,6 @@ const KEYWORDS = [
 ];
 
 // ============ 商品ラベル識別設定（ベビーモニターのみ例外） ============
-// 同じ検索キーワードで複数の自社商品を別々に記録したい場合にここに追記する
-// Amazon: ASINが確定しているのでASINで識別（確実）
-// 楽天: タイトルに含まれる文字列の組み合わせで識別（上から順に評価し最初にマッチしたlabelを使用）
 const PRODUCT_LABEL_MAP = {
   "ベビーモニター": {
     amazon: {
@@ -41,12 +38,10 @@ function applyKeywordVariants(rows, platform) {
     const map = PRODUCT_LABEL_MAP[row.keyword];
     if (!map) return row;
 
-    // Amazon: ASINで確定
     if (platform === "amazon" && map.amazon && row.asin && map.amazon[row.asin]) {
       return { ...row, keyword: map.amazon[row.asin] };
     }
 
-    // 楽天: タイトルの文字列で識別
     if (platform === "rakuten" && map.rakuten) {
       for (const rule of map.rakuten) {
         if (rule.contains.every(t => row.title.includes(t))) {
@@ -61,7 +56,6 @@ function applyKeywordVariants(rows, platform) {
 
 // ---------- Amazon ----------
 async function scrapeAmazon(page, keyword, dateStr) {
-  // 最大3回まで試行: 広告0件ならリロードして再取得
   let data = [];
   let attemptCount = 0;
   const maxAttempts = 3;
@@ -75,7 +69,6 @@ async function scrapeAmazon(page, keyword, dateStr) {
         { waitUntil: "domcontentloaded" }
       );
     } else {
-      // リトライ時: ランダムに長めに待ってリロード
       console.log(`    広告0件のためリトライ (${attemptCount}回目)`);
       await page.waitForTimeout(8000 + Math.floor(Math.random() * 5000));
       await page.reload({ waitUntil: "domcontentloaded" });
@@ -101,7 +94,6 @@ async function scrapeAmazon(page, keyword, dateStr) {
     data = await page.evaluate(() => {
       const items = document.querySelectorAll('[data-component-type="s-search-result"]');
       return Array.from(items).map((el) => {
-        // ASIN
         let asin = el.getAttribute("data-asin") || "";
         if (!asin) {
           const inner = el.querySelector("[data-asin]");
@@ -122,7 +114,6 @@ async function scrapeAmazon(page, keyword, dateStr) {
           }
         }
 
-        // スポンサー判定
         const sspaLink = el.querySelector('a[href*="/sspa/click"]');
         const hasAdHolder = !!el.querySelector(".AdHolder") || el.classList.contains("AdHolder");
         const hasPuisSponsored = !!el.querySelector('[class*="puis-sponsored-label-text"]') ||
@@ -203,7 +194,6 @@ async function scrapeAmazon(page, keyword, dateStr) {
       });
     });
 
-    // 1件でも広告が取れたら成功、なければリトライへ
     const hasAnyAd = data.some(d => d.isSponsored);
     if (hasAnyAd) break;
     if (attemptCount >= maxAttempts) break;
@@ -241,7 +231,6 @@ async function scrapeRakuten(page, keyword, dateStr) {
   const data = await page.evaluate((selector) => {
     const items = document.querySelectorAll(selector);
     return Array.from(items).map((el) => {
-      // 商品URL & itemCode
       let productUrl = "", itemCode = "";
       const titleLink = el.querySelector("a[href*='item.rakuten.co.jp']") ||
                         el.querySelector("h2 a") ||
@@ -252,7 +241,6 @@ async function scrapeRakuten(page, keyword, dateStr) {
         if (m) itemCode = `${m[1]}:${m[2]}`;
       }
 
-      // タイトル(先頭の[PR]は除去)
       let titleRaw = "";
       const titleEl = el.querySelector("h2") ||
                       el.querySelector("[class*='title']") ||
@@ -261,7 +249,6 @@ async function scrapeRakuten(page, keyword, dateStr) {
       if (!titleRaw && titleLink) titleRaw = titleLink.textContent.trim();
       titleRaw = titleRaw.replace(/\s+/g, " ");
 
-      // PR判定
       const fullText = el.textContent || "";
       const isSponsored =
         fullText.includes("[PR]") ||
@@ -269,13 +256,11 @@ async function scrapeRakuten(page, keyword, dateStr) {
         titleRaw.startsWith("[PR]") ||
         titleRaw.startsWith("【PR】");
 
-      // 表示用タイトル
       const title = titleRaw
         .replace(/^\[PR\]\s*/, "")
         .replace(/^【PR】\s*/, "")
         .substring(0, 200);
 
-      // 価格
       let price = "";
       const priceEl = el.querySelector("[class*='price'] .important") ||
                       el.querySelector("[class*='price--']") ||
@@ -285,7 +270,6 @@ async function scrapeRakuten(page, keyword, dateStr) {
         if (m) price = m[1];
       }
 
-      // 星評価: <span class="score">4.56</span>
       let rating = "";
       const scoreEl = el.querySelector(".dui-rating .score") ||
                       el.querySelector("[class*='score']");
@@ -294,7 +278,6 @@ async function scrapeRakuten(page, keyword, dateStr) {
         if (m) rating = m[1];
       }
 
-      // レビュー数: <span class="legend">(4,911件)</span>
       let reviewCount = "";
       const legendEl = el.querySelector(".dui-rating-filter .legend") ||
                        el.querySelector("a[href*='review.rakuten'] .legend") ||
@@ -327,28 +310,38 @@ function assignRanks(data, keyword, dateStr) {
   });
 }
 
-// ---------- GAS送信 ----------
+// ---------- GAS送信 (修正: リダイレクト先もPOSTで送信) ----------
 function postToGAS(platform, rows) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({ platform, rows });
-    const url = new URL(GAS_WEBAPP_URL);
-    const options = {
-      method: "POST", hostname: url.hostname, path: url.pathname + url.search,
-      headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) },
-    };
-    const req = https.request(options, (res) => {
-      if (res.statusCode === 302 && res.headers.location) {
-        https.get(res.headers.location, (res2) => {
-          let chunks = ""; res2.on("data", d => chunks += d);
-          res2.on("end", () => resolve(chunks));
-        }).on("error", reject);
-        return;
-      }
-      let chunks = ""; res.on("data", d => chunks += d);
-      res.on("end", () => resolve(chunks));
-    });
-    req.on("error", reject);
-    req.write(body); req.end();
+
+    function doPost(targetUrl) {
+      const url = new URL(targetUrl);
+      const options = {
+        method: "POST",
+        hostname: url.hostname,
+        path: url.pathname + url.search,
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(body),
+        },
+      };
+      const req = https.request(options, (res) => {
+        if ((res.statusCode === 301 || res.statusCode === 302) && res.headers.location) {
+          // リダイレクト先もPOSTで再送信
+          doPost(res.headers.location);
+          return;
+        }
+        let chunks = "";
+        res.on("data", d => chunks += d);
+        res.on("end", () => resolve(chunks));
+      });
+      req.on("error", reject);
+      req.write(body);
+      req.end();
+    }
+
+    doPost(GAS_WEBAPP_URL);
   });
 }
 
